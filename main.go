@@ -41,12 +41,47 @@ func GetDiskUsage(path string) (disk DiskStats) {
 	disk.Free = fs.Bfree * uint64(fs.Bsize)
 	disk.Used = disk.All - disk.Free
 
-	disk.Used_Percent = float64(disk.Used) / float64(disk.All)
-	return
+	disk.Used_Percent = (float64(disk.Used) / float64(disk.All)) * 100
+	return disk
 }
 
 func FloatToString(input float64) string {
 	return strconv.FormatFloat(input, 'f', 2, 64)
+}
+
+func GetCPUUsage() string {
+	before, err := cpu.Get()
+	if err != nil {
+		fmt.Fprint(os.Stderr, "%s\n", err)
+	}
+	time.Sleep(time.Duration(1) * time.Second)
+	after, err := cpu.Get()
+
+	if err != nil {
+		fmt.Fprint(os.Stderr, "%s\n", err)
+	}
+	total := float64(after.Total - before.Total)
+	total_cpu_usage := (float64(float64(after.System-before.System)+float64(after.User-before.User)) / total * 100)
+	fmt.Printf("CPU total use: %s%%\n", FloatToString(total_cpu_usage))
+
+	return FloatToString(total_cpu_usage)
+}
+
+func GetMemoryUsage() string {
+	memory, err := memory.Get()
+	if err != nil {
+		fmt.Fprint(os.Stderr, "%s\n", err)
+	}
+	total_mem_usage := (float64(memory.Used) / float64(memory.Total) * 100)
+	fmt.Printf("memory total use: %s%%\n", FloatToString(total_mem_usage))
+
+	return FloatToString(total_mem_usage)
+}
+
+func PublishMessage(channel, message string, client mqtt.Client) {
+	token := client.Publish(channel, 0, false, message)
+	token.Wait()
+	return
 }
 
 const (
@@ -68,36 +103,14 @@ func main() {
 	}
 
 	for {
-		before, err := cpu.Get()
-		if err != nil {
-			fmt.Fprint(os.Stderr, "%s\n", err)
-		}
-		time.Sleep(time.Duration(1) * time.Second)
-		after, err := cpu.Get()
+		cpu_uage := GetCPUUsage()
+		PublishMessage("/test/cpu", cpu_uage, client)
 
-		if err != nil {
-			fmt.Fprint(os.Stderr, "%s\n", err)
-		}
-		total := float64(after.Total - before.Total)
-		total_cpu_usage := (float64(float64(after.System-before.System)+float64(after.User-before.User)) / total * 100)
-		fmt.Printf("cpu total: %s%%\n", FloatToString(total_cpu_usage))
-		token := client.Publish("/test/cpu", 0, false, FloatToString(total_cpu_usage))
-		token.Wait()
-		memory, err := memory.Get()
-
-		if err != nil {
-			fmt.Fprint(os.Stderr, "%s\n", err)
-		}
-		total_mem_usage := (float64(memory.Used) / float64(memory.Total) * 100)
-		fmt.Printf("memory total use: %s%%\n", FloatToString(total_mem_usage))
-		token_mem := client.Publish("/test/memory", 0, false, FloatToString(total_mem_usage))
-		token_mem.Wait()
+		mem_usage := GetMemoryUsage()
+		PublishMessage("/test/memory", mem_usage, client)
 
 		disk := GetDiskUsage("/")
-		total_disk_usage := (float64(disk.Used_Percent) * 100)
-		fmt.Printf("Disk Usage: %s%%\n", FloatToString(total_disk_usage))
-		token_disk := client.Publish("/test/disk", 0, false, FloatToString(total_disk_usage))
-		token_disk.Wait()
+		PublishMessage("/test/disk", FloatToString(disk.Used_Percent), client)
 
 		cmd := "sensors | grep CPU | sed 's/.*+//' | sed 's/°.*//'"
 		out, err := exec.Command("bash", "-c", cmd).Output()
