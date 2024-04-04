@@ -3,13 +3,15 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
+	"os/exec"
 	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/mackerelio/go-osstat/cpu"
 	"github.com/mackerelio/go-osstat/memory"
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 var (
@@ -22,9 +24,9 @@ var (
 )
 
 type DiskStats struct {
-	All uint64
-	Free uint64
-	Used uint64
+	All          uint64
+	Free         uint64
+	Used         uint64
 	Used_Percent float64
 }
 
@@ -39,7 +41,7 @@ func GetDiskUsage(path string) (disk DiskStats) {
 	disk.Free = fs.Bfree * uint64(fs.Bsize)
 	disk.Used = disk.All - disk.Free
 
-	disk.Used_Percent = float64(disk.Used)/float64(disk.All)
+	disk.Used_Percent = float64(disk.Used) / float64(disk.All)
 	return
 }
 
@@ -86,16 +88,35 @@ func main() {
 		if err != nil {
 			fmt.Fprint(os.Stderr, "%s\n", err)
 		}
-		total_mem_usage := (float64(memory.Used)/float64(memory.Total)*100)
+		total_mem_usage := (float64(memory.Used) / float64(memory.Total) * 100)
 		fmt.Printf("memory total use: %s%%\n", FloatToString(total_mem_usage))
 		token_mem := client.Publish("/test/memory", 0, false, FloatToString(total_mem_usage))
 		token_mem.Wait()
 
 		disk := GetDiskUsage("/")
-		total_disk_usage := (float64(disk.Used_Percent)*100)
+		total_disk_usage := (float64(disk.Used_Percent) * 100)
 		fmt.Printf("Disk Usage: %s%%\n", FloatToString(total_disk_usage))
 		token_disk := client.Publish("/test/disk", 0, false, FloatToString(total_disk_usage))
 		token_disk.Wait()
+
+		cmd := "sensors | grep CPU | sed 's/.*+//' | sed 's/°.*//'"
+		out, err := exec.Command("bash", "-c", cmd).Output()
+		if err != nil {
+			fmt.Print("Error running shell command: ", err)
+		}
+		fmt.Printf("CPU TEMP: %s", out)
+		token_cpu_temp := client.Publish("/test/temp/cpu", 0, false, strings.TrimSuffix(string(out[:]), "\n"))
+		token_cpu_temp.Wait()
+
+		gpu_cmd := "sensors | grep GPU | sed 's/.*+//' | sed 's/°.*//'"
+		gpu_out, gpu_err := exec.Command("bash", "-c", gpu_cmd).Output()
+		if gpu_err != nil {
+			fmt.Print("Error running shell command: ", err)
+		}
+		fmt.Printf("GPU TEMP: %s", out)
+		token_gpu_temp := client.Publish("/test/temp/gpu", 0, false, strings.TrimSuffix(string(gpu_out[:]), "\n"))
+		token_gpu_temp.Wait()
+
 		time.Sleep(time.Duration(1) * time.Second)
 
 	}
