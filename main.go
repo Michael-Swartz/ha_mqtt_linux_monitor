@@ -81,7 +81,17 @@ func GetMemoryUsage() string {
 func PublishMessage(channel, message string, client mqtt.Client) {
 	token := client.Publish(channel, 0, false, message)
 	token.Wait()
-	return
+}
+
+// This essentially just pareses the `sensor` command
+func GetTemps(resource string) string {
+	cmd := fmt.Sprintf("sensors | grep %s | sed 's/.*+//' | sed 's/°.*//'", resource)
+	out, err := exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		fmt.Print("Error running shell command: ", err)
+	}
+	fmt.Printf("%s TEMP: %s", resource, out)
+	return strings.TrimSuffix(string(out[:]), "\n")
 }
 
 const (
@@ -112,25 +122,13 @@ func main() {
 		disk := GetDiskUsage("/")
 		PublishMessage("/test/disk", FloatToString(disk.Used_Percent), client)
 
-		cmd := "sensors | grep CPU | sed 's/.*+//' | sed 's/°.*//'"
-		out, err := exec.Command("bash", "-c", cmd).Output()
-		if err != nil {
-			fmt.Print("Error running shell command: ", err)
-		}
-		fmt.Printf("CPU TEMP: %s", out)
-		token_cpu_temp := client.Publish("/test/temp/cpu", 0, false, strings.TrimSuffix(string(out[:]), "\n"))
-		token_cpu_temp.Wait()
+		cpu_temp := GetTemps("CPU")
+		PublishMessage("/test/temp/cpu", cpu_temp, client)
 
-		gpu_cmd := "sensors | grep GPU | sed 's/.*+//' | sed 's/°.*//'"
-		gpu_out, gpu_err := exec.Command("bash", "-c", gpu_cmd).Output()
-		if gpu_err != nil {
-			fmt.Print("Error running shell command: ", err)
-		}
-		fmt.Printf("GPU TEMP: %s", out)
-		token_gpu_temp := client.Publish("/test/temp/gpu", 0, false, strings.TrimSuffix(string(gpu_out[:]), "\n"))
-		token_gpu_temp.Wait()
+		gpu_temp := GetTemps("GPU")
+		PublishMessage("/test/temp/GPU", gpu_temp, client)
 
-		time.Sleep(time.Duration(1) * time.Second)
+		//time.Sleep(time.Duration(1) * time.Second)
 
 	}
 }
