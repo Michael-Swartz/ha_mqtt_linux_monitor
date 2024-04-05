@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -94,6 +95,21 @@ func GetTemps(resource string) string {
 	return strings.TrimSuffix(string(out[:]), "\n")
 }
 
+func InitMqttClient(address string, port int) mqtt.Client {
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker(fmt.Sprintf("tcp://%s:%d", address, port))
+	opts.OnConnect = connectHandler
+	mqtt_client := mqtt.NewClient(opts)
+	if token := mqtt_client.Connect(); token.Wait() && token.Error() != nil {
+		panic(fmt.Sprintf("Error connecting to MQTT broker:", token.Error()))
+	}
+	return mqtt_client
+}
+
+func createTopic(prefix, topic string) string {
+	return fmt.Sprintf("/%s/%s", prefix, topic)
+}
+
 const (
 	B  = 1
 	KB = 1024 * B
@@ -103,32 +119,28 @@ const (
 
 func main() {
 
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(fmt.Sprintf("tcp://10.0.0.170:1883"))
-	opts.OnConnect = connectHandler
-	client := mqtt.NewClient(opts)
+	portPtr := flag.Int("port", 1883, "Port Number")
+	addressPtr := flag.String("address", "localhost", "IP or FQDN of Mqtt broker")
+	topicPrefix := flag.String("topic-prefix", "computer-monitor", "Prefix for the mqtt topic.")
 
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		panic(fmt.Sprintf("Error connecting to MQTT broker:", token.Error()))
-	}
+	flag.Parse()
+
+	client := InitMqttClient(*addressPtr, *portPtr)
 
 	for {
 		cpu_uage := GetCPUUsage()
-		PublishMessage("/test/cpu", cpu_uage, client)
+		PublishMessage(createTopic(*topicPrefix, "cpu"), cpu_uage, client)
 
 		mem_usage := GetMemoryUsage()
-		PublishMessage("/test/memory", mem_usage, client)
+		PublishMessage(createTopic(*topicPrefix, "memory"), mem_usage, client)
 
 		disk := GetDiskUsage("/")
-		PublishMessage("/test/disk", FloatToString(disk.Used_Percent), client)
+		PublishMessage(createTopic(*topicPrefix, "disk"), FloatToString(disk.Used_Percent), client)
 
 		cpu_temp := GetTemps("CPU")
-		PublishMessage("/test/temp/cpu", cpu_temp, client)
+		PublishMessage(createTopic(*topicPrefix, "temp/cpu"), cpu_temp, client)
 
 		gpu_temp := GetTemps("GPU")
-		PublishMessage("/test/temp/GPU", gpu_temp, client)
-
-		//time.Sleep(time.Duration(1) * time.Second)
-
+		PublishMessage(createTopic(*topicPrefix, "temp/gpu"), gpu_temp, client)
 	}
 }
