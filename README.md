@@ -24,3 +24,5 @@ By default this will export the following metrics on the following topics:
 | Memory Usage | /computer-monitor/memory |
 | CPU Temperature | /computer-monitor/temp/cpu |
 | GPU Temperature | /computer-monitor/temp/gpu |
+| Interface RX Bytes | /computer-monitor/network/\<interface-name\>/RX |
+| Interface TX Bytes | /computer-monitor/network/\<interface-name\>/TX |

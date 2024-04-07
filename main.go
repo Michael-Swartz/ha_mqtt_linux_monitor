@@ -13,6 +13,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/mackerelio/go-osstat/cpu"
 	"github.com/mackerelio/go-osstat/memory"
+	"github.com/mackerelio/go-osstat/network"
 )
 
 var (
@@ -29,6 +30,12 @@ type DiskStats struct {
 	Free         uint64
 	Used         uint64
 	Used_Percent float64
+}
+
+type InterfaceStats struct {
+	Name string
+	Rx   uint64
+	Tx   uint64
 }
 
 func GetDiskUsage(path string) (disk DiskStats) {
@@ -48,6 +55,10 @@ func GetDiskUsage(path string) (disk DiskStats) {
 
 func FloatToString(input float64) string {
 	return strconv.FormatFloat(input, 'f', 2, 64)
+}
+
+func uint64ToString(input uint64) string {
+	return fmt.Sprint(input)
 }
 
 func GetCPUUsage() string {
@@ -77,6 +88,32 @@ func GetMemoryUsage() string {
 	fmt.Printf("memory total use: %s%%\n", FloatToString(total_mem_usage))
 
 	return FloatToString(total_mem_usage)
+}
+
+func GetNetworkUsage() []InterfaceStats {
+	var interfaces []InterfaceStats
+	before, err := network.Get()
+	if err != nil {
+		fmt.Printf("%s\n", err)
+	}
+	time.Sleep(time.Duration(1) * time.Second)
+	after, err := network.Get()
+	if err != nil {
+		fmt.Printf("%s\n", err)
+	}
+
+	for _, ia := range after {
+		for _, ib := range before {
+			if ia.Name == ib.Name {
+				rx := ia.RxBytes - ib.RxBytes
+				tx := ia.TxBytes - ib.TxBytes
+				fmt.Printf("Interface: %s RX: %d TX: %d \n", ia.Name, rx, tx)
+				interfaces = append(interfaces, InterfaceStats{Name: ia.Name, Rx: rx, Tx: tx})
+			}
+		}
+	}
+	return interfaces
+
 }
 
 func PublishMessage(channel, message string, client mqtt.Client) {
@@ -110,6 +147,10 @@ func createTopic(prefix, topic string) string {
 	return fmt.Sprintf("/%s/%s", prefix, topic)
 }
 
+func createNetworkTopic(prefix, network_interface, metric string) string {
+	return fmt.Sprintf("/%s/network/%s/%s", prefix, network_interface, metric)
+}
+
 const (
 	B  = 1
 	KB = 1024 * B
@@ -128,19 +169,23 @@ func main() {
 	client := InitMqttClient(*addressPtr, *portPtr)
 
 	for {
-		cpu_uage := GetCPUUsage()
-		PublishMessage(createTopic(*topicPrefix, "cpu"), cpu_uage, client)
+		go PublishMessage(createTopic(*topicPrefix, "cpu"), GetCPUUsage(), client)
 
-		mem_usage := GetMemoryUsage()
-		PublishMessage(createTopic(*topicPrefix, "memory"), mem_usage, client)
+		go PublishMessage(createTopic(*topicPrefix, "memory"), GetMemoryUsage(), client)
 
-		disk := GetDiskUsage("/")
-		PublishMessage(createTopic(*topicPrefix, "disk"), FloatToString(disk.Used_Percent), client)
+		go PublishMessage(createTopic(*topicPrefix, "disk"), FloatToString(GetDiskUsage("/").Used_Percent), client)
 
-		cpu_temp := GetTemps("CPU")
-		PublishMessage(createTopic(*topicPrefix, "temp/cpu"), cpu_temp, client)
+		go PublishMessage(createTopic(*topicPrefix, "temp/cpu"), GetTemps("CPU"), client)
 
-		gpu_temp := GetTemps("GPU")
-		PublishMessage(createTopic(*topicPrefix, "temp/gpu"), gpu_temp, client)
+		go PublishMessage(createTopic(*topicPrefix, "temp/gpu"), GetTemps("GPU"), client)
+
+		go func() {
+			is := GetNetworkUsage()
+
+			for _, i := range is {
+				PublishMessage(createNetworkTopic(*topicPrefix, i.Name, "RX"), uint64ToString(i.Rx), client)
+				PublishMessage(createNetworkTopic(*topicPrefix, i.Name, "TX"), uint64ToString(i.Tx), client)
+			}
+		}()
 	}
 }
