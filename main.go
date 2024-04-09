@@ -17,9 +17,6 @@ import (
 )
 
 var (
-	broker = "10.0.0.170"
-	port   = "1883"
-
 	connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
 		fmt.Println("Connected")
 	}
