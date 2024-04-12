@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +16,22 @@ import (
 	"github.com/mackerelio/go-osstat/memory"
 	"github.com/mackerelio/go-osstat/network"
 )
+
+type NvidiaSmiLog struct {
+	XMLName   xml.Name `xml:"nvidia_smi_log"`
+	Timestamp string   `xml:"timestamp"`
+	Gpu       struct {
+		Text        string `xml:",chardata"`
+		ID          string `xml:"id,attr"`
+		Utilization struct {
+			Text        string `xml:",chardata"`
+			GpuUtil     string `xml:"gpu_util"`
+			MemoryUtil  string `xml:"memory_util"`
+			EncoderUtil string `xml:"encoder_util"`
+			DecoderUtil string `xml:"decoder_util"`
+		} `xml:"utilization"`
+	} `xml:"gpu"`
+}
 
 var (
 	connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -140,6 +157,23 @@ func InitMqttClient(address string, port int) mqtt.Client {
 	return mqtt_client
 }
 
+func getGPUUsage() string {
+	out, err := exec.Command("nvidia-smi", "-q", "-x").Output()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	var log NvidiaSmiLog
+	err = xml.Unmarshal(out, &log)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	utilization := log.Gpu.Utilization.GpuUtil[:2]
+	fmt.Printf("GPU total use: %s%% \n", utilization)
+	return utilization
+}
+
 func createTopic(prefix, topic string) string {
 	return fmt.Sprintf("/%s/%s", prefix, topic)
 }
@@ -175,6 +209,8 @@ func main() {
 		go PublishMessage(createTopic(*topicPrefix, "temp/cpu"), GetTemps("CPU"), client)
 
 		go PublishMessage(createTopic(*topicPrefix, "temp/gpu"), GetTemps("GPU"), client)
+
+		go PublishMessage(createTopic(*topicPrefix, "gpu"), getGPUUsage(), client)
 
 		go func() {
 			is := GetNetworkUsage()
